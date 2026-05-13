@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { useToast } from '@/hooks/use-toast';
-import { CopyIcon, DownloadIcon, UploadIcon, ZapIcon, ImageIcon, XIcon, ClipboardPasteIcon, AlignJustifyIcon } from 'lucide-react';
+import { CopyIcon, DownloadIcon, UploadIcon, ZapIcon, ImageIcon, XIcon, ClipboardPasteIcon, AlignJustifyIcon, ChevronLeftIcon, ChevronRightIcon, FileIcon, TrashIcon } from 'lucide-react';
 import Link from 'next/link';
 import CodeEditor from '@/components/code-editor';
 import SvgPreview from '@/components/svg-preview';
@@ -15,8 +15,17 @@ import { beautifySVG } from '@/lib/utils';
 import Footer from '@/components/footer';
 import Header from '@/components/header';
 
+interface SvgFile {
+  name: string;
+  content: string;
+  size: number;
+}
+
 export default function Home() {
-  const [svgCode, setSvgCode] = useState<string>(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="600" height="400" fill="#1a1a2e"/><circle cx="500" cy="80" r="40" fill="#e94560" opacity="0.7"/><text x="300" y="150" font-family="Arial, sans-serif" font-size="40" font-weight="bold" text-anchor="middle" fill="#ffffff">
+  const [svgFiles, setSvgFiles] = useState<SvgFile[]>([
+    {
+      name: 'welcome.svg',
+      content: `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="600" height="400" fill="#1a1a2e"/><circle cx="500" cy="80" r="40" fill="#e94560"/><text x="300" y="150" font-family="Arial, sans-serif" font-size="60" font-weight="bold" text-anchor="middle" fill="#0f3460">
     WELCOME TO
   </text><text x="300" y="210" font-family="Arial, sans-serif" font-size="50" font-weight="bold" text-anchor="middle" fill="#e94560">
     SVGViewer.app
@@ -24,14 +33,22 @@ export default function Home() {
     VISIT NOW
   </text><text x="300" y="350" font-family="Arial, sans-serif" font-size="20" text-anchor="middle" fill="#ffffff">
     https://svgviewer.app
-  </text></svg>`);
+  </text></svg>`,
+      size: 0,
+    }
+  ]);
+  const [activeFileIndex, setActiveFileIndex] = useState<number>(0);
   const [originalSize, setOriginalSize] = useState<number>(0);
   const [optimizedSize, setOptimizedSize] = useState<number>(0);
   const [optimizedCode, setOptimizedCode] = useState<string>('');
   const [zoom, setZoom] = useState<number>(100);
   const [mobileView, setMobileView] = useState<'code' | 'preview'>('preview');
+  const [showSidebar, setShowSidebar] = useState<boolean>(true);
   
   const { toast } = useToast();
+
+  const activeFile = svgFiles[activeFileIndex];
+  const svgCode = activeFile?.content || '';
 
   useEffect(() => {
     if (svgCode) {
@@ -43,34 +60,71 @@ export default function Home() {
   }, [svgCode]);
 
   useEffect(() => {
-    // Add viewport resize listener to adjust UI for mobile
     const handleResize = () => {
       if (window.innerWidth < 768) {
-        // Default to preview on small screens
         setMobileView('preview');
+        setShowSidebar(false);
+      } else {
+        setShowSidebar(true);
       }
     };
     
-    // Set initial state
     handleResize();
-    
-    // Add event listener
     window.addEventListener('resize', handleResize);
     
-    // Cleanup
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const content = event.target?.result as string;
-        setSvgCode(content);
-      };
-      reader.readAsText(file);
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    try {
+      const fileReaders = Array.from(files).map(file => {
+        return new Promise<SvgFile>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const content = event.target?.result as string;
+            resolve({
+              name: file.name,
+              content,
+              size: file.size,
+            });
+          };
+          reader.onerror = reject;
+          reader.readAsText(file);
+        });
+      });
+
+      const newFiles = await Promise.all(fileReaders);
+      setSvgFiles(prev => [...prev, ...newFiles]);
+      setActiveFileIndex(svgFiles.length); // Set active to first newly uploaded file
+      
+      toast({
+        title: "Files uploaded",
+        description: `${newFiles.length} SVG file(s) uploaded successfully`,
+      });
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: "Failed to read one or more files",
+        variant: "destructive",
+      });
     }
+
+    // Reset input
+    e.target.value = '';
+  };
+
+  const handleSvgCodeChange = (newCode: string) => {
+    setSvgFiles(prev => {
+      const updated = [...prev];
+      updated[activeFileIndex] = {
+        ...updated[activeFileIndex],
+        content: newCode,
+      };
+      return updated;
+    });
   };
 
   const handleCopy = (text: string) => {
@@ -93,9 +147,15 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
-
   const handleClear = () => {
-    setSvgCode('');
+    setSvgFiles(prev => {
+      const updated = [...prev];
+      updated[activeFileIndex] = {
+        ...updated[activeFileIndex],
+        content: '',
+      };
+      return updated;
+    });
     toast({
       title: "Cleared",
       description: "SVG code has been cleared",
@@ -103,13 +163,13 @@ export default function Home() {
   };
 
   const handleFormat = () => {
-    setSvgCode(beautifySVG(svgCode));
+    handleSvgCodeChange(beautifySVG(svgCode));
   };
 
   const handlePaste = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      setSvgCode(text);
+      handleSvgCodeChange(text);
       toast({
         title: "Pasted from clipboard",
         description: "SVG code has been pasted from your clipboard",
@@ -120,6 +180,46 @@ export default function Home() {
         description: "Failed to read from clipboard",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleDeleteFile = (index: number) => {
+    if (svgFiles.length === 1) {
+      toast({
+        title: "Cannot delete",
+        description: "You must keep at least one file",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSvgFiles(prev => prev.filter((_, i) => i !== index));
+    
+    if (activeFileIndex === index) {
+      setActiveFileIndex(Math.max(0, index - 1));
+    } else if (activeFileIndex > index) {
+      setActiveFileIndex(activeFileIndex - 1);
+    }
+
+    toast({
+      title: "File deleted",
+      description: "SVG file has been removed",
+    });
+  };
+
+  const handlePrevious = () => {
+    setActiveFileIndex(prev => (prev === 0 ? svgFiles.length - 1 : prev - 1));
+  };
+
+  const handleNext = () => {
+    setActiveFileIndex(prev => (prev === svgFiles.length - 1 ? 0 : prev + 1));
+  };
+
+  const handleSelectFile = (index: number) => {
+    setActiveFileIndex(index);
+    // Close sidebar on mobile after selecting
+    if (window.innerWidth < 768) {
+      setShowSidebar(false);
     }
   };
 
@@ -139,15 +239,23 @@ export default function Home() {
             <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
               <Button
                 variant="outline"
+                className="gap-2 shadow-sm text-sm h-9 md:hidden"
+                onClick={() => setShowSidebar(!showSidebar)}
+              >
+                {showSidebar ? 'Hide' : 'Show'} Files
+              </Button>
+              <Button
+                variant="outline"
                 className="gap-2 shadow-sm text-sm h-9"
                 onClick={() => document.getElementById('file-upload')?.click()}
               >
                 <UploadIcon className="h-4 w-4" />
-                Upload SVG
+                Upload SVG(s)
                 <input
                   id="file-upload"
                   type="file"
-                  accept=".svg"
+                  accept=".svg,image/svg+xml"
+                  multiple
                   className="hidden"
                   onChange={handleFileUpload}
                 />
@@ -155,7 +263,7 @@ export default function Home() {
               <Button
                 variant="outline"
                 className="gap-2 shadow-sm text-sm h-9"
-                onClick={() => handleDownload(svgCode, 'download.svg')}
+                onClick={() => handleDownload(svgCode, activeFile?.name || 'download.svg')}
               >
                 <DownloadIcon className="h-4 w-4" />
                 Download
@@ -178,15 +286,68 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Mobile View Switcher */}
-          {/* <div className="md:hidden mb-2">
-            <Tabs defaultValue={mobileView} onValueChange={(value) => setMobileView(value as 'code' | 'preview')} className="w-full">
-              <TabsList className="grid grid-cols-2 w-full">
-                <TabsTrigger value="code">Code</TabsTrigger>
-                <TabsTrigger value="preview">Preview</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div> */}
+          {/* File Manager Panel */}
+          {showSidebar && (
+            <div className="bg-card border rounded-lg p-4 shadow-sm gradient-border max-h-48 overflow-y-auto">
+              <h3 className="font-semibold text-sm mb-3">Uploaded Files ({svgFiles.length})</h3>
+              <div className="space-y-2">
+                {svgFiles.map((file, index) => (
+                  <div
+                    key={index}
+                    className={`flex items-center justify-between p-2 rounded cursor-pointer transition-colors ${
+                      activeFileIndex === index
+                        ? 'bg-primary/20 border border-primary'
+                        : 'bg-background hover:bg-muted border border-transparent'
+                    }`}
+                    onClick={() => handleSelectFile(index)}
+                  >
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <FileIcon className="h-4 w-4 flex-shrink-0" />
+                      <span className="text-sm truncate">{file.name}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 flex-shrink-0 hover:bg-destructive/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteFile(index);
+                      }}
+                    >
+                      <TrashIcon className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Navigation Buttons */}
+          {svgFiles.length > 1 && (
+            <div className="flex items-center justify-between bg-card p-3 rounded-lg shadow-sm gradient-border">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handlePrevious}
+              >
+                <ChevronLeftIcon className="h-4 w-4" />
+                Previous
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                {activeFileIndex + 1} / {svgFiles.length}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleNext}
+              >
+                Next
+                <ChevronRightIcon className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
 
           {/* 使用响应式布局 */}
           <div className="flex flex-col md:grid md:grid-cols-2 gap-6 flex-1 min-h-0">
@@ -234,7 +395,7 @@ export default function Home() {
                 </div>
               </div>
               <div className="border rounded-lg overflow-hidden flex-1 min-h-0 shadow-md gradient-border">
-                <CodeEditor value={svgCode} onChange={setSvgCode} />
+                <CodeEditor value={svgCode} onChange={handleSvgCodeChange} />
               </div>
             </div>
 
@@ -263,7 +424,7 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap gap-3 justify-center my-6">
-            <Button variant="default" className="gap-2 shadow-md text-sm h-9" onClick={() => handleDownload(svgCode, 'download.svg')}>
+            <Button variant="default" className="gap-2 shadow-md text-sm h-9" onClick={() => handleDownload(svgCode, activeFile?.name || 'download.svg')}>
               <DownloadIcon className="h-4 w-4" />
               Download SVG
             </Button>
